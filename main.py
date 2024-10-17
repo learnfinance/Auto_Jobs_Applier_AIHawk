@@ -3,7 +3,6 @@ import re
 import sys
 from pathlib import Path
 import yaml
-import click
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
 from webdriver_manager.chrome import ChromeDriverManager
@@ -16,6 +15,8 @@ from src.aihawk_bot_facade import AIHawkBotFacade
 from src.aihawk_job_manager import AIHawkJobManager
 from src.job_application_profile import JobApplicationProfile
 from loguru import logger
+import streamlit as st
+
 
 # Suppress stderr only during specific operations
 original_stderr = sys.stderr
@@ -157,6 +158,8 @@ def init_browser() -> webdriver.Chrome:
         raise RuntimeError(f"Failed to initialize browser: {str(e)}")
 
 def create_and_run_bot(parameters, llm_api_key):
+    print("Debug: Parameters received:", parameters)
+    print("Debug: Uploads dictionary:", parameters.get('uploads', {}))
     try:
         style_manager = StyleManager()
         resume_generator = ResumeGenerator()
@@ -191,33 +194,54 @@ def create_and_run_bot(parameters, llm_api_key):
         raise RuntimeError(f"Error running the bot: {str(e)}")
 
 
-@click.command()
-@click.option('--resume', type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path), help="Path to the resume PDF file")
-@click.option('--collect', is_flag=True, help="Only collects data job information into data.json file")
-def main(collect: False, resume: Path = None):
-    try:
-        data_folder = Path("data_folder")
-        secrets_file, config_file, plain_text_resume_file, output_folder = FileManager.validate_data_folder(data_folder)
-        
-        parameters = ConfigValidator.validate_config(config_file)
-        llm_api_key = ConfigValidator.validate_secrets(secrets_file)
-        
-        parameters['uploads'] = FileManager.file_paths_to_dict(resume, plain_text_resume_file)
-        parameters['outputFileDirectory'] = output_folder
-        parameters['collectMode'] = collect
-        
-        create_and_run_bot(parameters, llm_api_key)
-    except ConfigError as ce:
-        logger.error(f"Configuration error: {str(ce)}")
-        logger.error(f"Refer to the configuration guide for troubleshooting: https://github.com/feder-cr/Auto_Jobs_Applier_AIHawk?tab=readme-ov-file#configuration {str(ce)}")
+def main():
+    st.title("Auto Jobs Applier AIHawk")
+    st.write("Welcome to Auto Jobs Applier AIHawk!")
 
-    except FileNotFoundError as fnf:
-        logger.error(f"File not found: {str(fnf)}")
-        logger.error("Ensure all required files are present in the data folder.")
-    except RuntimeError as re:
-        logger.error(f"Runtime error: {str(re)}")
-    except Exception as e:
-        logger.error(f"An unexpected error occurred: {str(e)}")
+    # File uploader for resume (optional)
+    resume_file = st.file_uploader("Upload your resume PDF file (optional)", type=["pdf"])
+    
+    # Checkbox for collect mode
+    collect = st.checkbox("Only collect data job information into data.json file")
+
+    # Run button to initiate the bot
+    if st.button("Run Job Applier"):
+        try:
+            # Set data folder path
+            data_folder = Path("data_folder")
+            secrets_file, config_file, plain_text_resume_file, output_folder = FileManager.validate_data_folder(data_folder)
+
+            # Load configuration and secrets
+            parameters = ConfigValidator.validate_config(config_file)
+            llm_api_key = ConfigValidator.validate_secrets(secrets_file)
+
+            # Process uploaded resume file if it exists
+            if resume_file:
+                # Save uploaded file to output folder temporarily
+                resume_path = output_folder / "uploaded_resume.pdf"
+                with open(resume_path, "wb") as f:
+                    f.write(resume_file.read())
+                parameters['uploads'] = FileManager.file_paths_to_dict(resume_path, plain_text_resume_file)
+            else:
+                parameters['uploads'] = FileManager.file_paths_to_dict(None, plain_text_resume_file)
+
+            parameters['outputFileDirectory'] = output_folder
+            parameters['collectMode'] = collect
+
+            # Run the bot
+            create_and_run_bot(parameters, llm_api_key)
+            st.success("Job application process completed successfully!")
+        except ConfigError as ce:
+            st.error(f"Configuration error: {str(ce)}")
+            st.error(f"Refer to the configuration guide for troubleshooting: https://github.com/feder-cr/Auto_Jobs_Applier_AIHawk?tab=readme-ov-file#configuration")
+
+        except FileNotFoundError as fnf:
+            st.error(f"File not found: {str(fnf)}")
+            st.error("Ensure all required files are present in the data folder.")
+        except RuntimeError as re:
+            st.error(f"Runtime error: {str(re)}")
+        except Exception as e:
+            st.error(f"An unexpected error occurred: {str(e)}")
 
 if __name__ == "__main__":
     main()
